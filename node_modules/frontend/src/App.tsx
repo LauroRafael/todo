@@ -395,7 +395,7 @@ export function App() {
                         <span className="text-sm text-slate-300">{t.executedHours}h</span>
                       </div>
                       <div>
-                        <span className="block text-xs text-slate-500">Adiada</span>
+                        <span className="block text-xs text-slate-500">Estouro</span>
                         <span className="text-sm text-slate-300">{t.postponedCount}x</span>
                       </div>
                       <div className="flex-1">
