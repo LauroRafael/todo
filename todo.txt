@@ -1,0 +1,11 @@
+todo
+
+Adicione apontamentos dentro de cada uma das tasks. 
+Alem do titulo e descrição, preciso adicionar:
+- prazo limite
+- quando eu estiver executando a tarefa, pode ser que eu precise fazer n apontamentos e status dessa tarefa;
+- mostrando o percentual até sua conclusão
+- na task mostrar horas totais estimadas para a execução e horas já executadas.
+- na task mostrar quantidade de vezes que a task foi adiada.
+
+Preciso que cada task seja realista e auditavel.
