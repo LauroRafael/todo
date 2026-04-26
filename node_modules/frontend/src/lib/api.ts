@@ -20,6 +20,7 @@ export type Task = {
   estimatedHours: number;
   executedHours: number;
   postponedCount: number;
+  apontamentosCount?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -58,6 +59,7 @@ export const api = {
     http<Task>(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteTask: (id: string) => http<void>(`/tasks/${id}`, { method: "DELETE" }),
   listApontamentos: (taskId: string) => http<Apontamento[]>(`/tasks/${taskId}/apontamentos`),
+  countApontamentos: (taskId: string) => http<{ count: number }>(`/tasks/${taskId}/apontamentos/count`),
   createApontamento: (data: { taskId: string; content?: string | null; hoursSpent: number; workDate?: string }) =>
     http<Apontamento>("/tasks/apontamentos", { method: "POST", body: JSON.stringify(data) }),
   updateApontamento: (id: string, data: { content?: string | null; hoursSpent?: number; workDate?: string }) =>

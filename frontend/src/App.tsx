@@ -1,6 +1,25 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import Swal from "sweetalert2";
+import withReactContent from "sweetalert2-react-content";
 import { api, type Apontamento, type Health, type Task, type TaskStatus } from "./lib/api";
+
+const SweetAlert = withReactContent(Swal);
+
+const swalDefaults = {
+  confirmButtonColor: "#4f46e5",
+  cancelButtonColor: "#64748b",
+  background: "#1e293b",
+  color: "#f1f5f9"
+};
+
+const toast = (icon: "success" | "error", title: string) =>
+  SweetAlert.fire({ icon, title, timer: 2000, toast: true, position: "bottom-right", ...swalDefaults });
+
+const confirm = (title: string, confirmText = "Remover") =>
+  SweetAlert.fire({ icon: "warning", title, showCancelButton: true, confirmButtonText: confirmText, confirmButtonColor: "#dc2626", background: "#1e293b", color: "#f1f5f9" });
 
 type Draft = {
   title: string;
@@ -16,6 +35,14 @@ function formatDate(date: string | null): string {
   const month = String(d.getUTCMonth() + 1).padStart(2, "0");
   const year = d.getUTCFullYear();
   return `${day}/${month}/${year}`;
+}
+
+function formatHours(hours: number): string {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (m === 0) return `${h}h`;
+  if (h === 0) return `${m}m`;
+  return `${h}h ${m}m`;
 }
 
 function calculatePercent(task: Task): number {
@@ -46,7 +73,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: () => void; onUpdate: () => void }) {
   const [apontamentos, setApontamentos] = useState<Apontamento[]>([]);
   const [loading, setLoading] = useState(true);
-  const [draft, setDraft] = useState({ content: "", hoursSpent: 1, workDate: new Date().toISOString().split("T")[0] });
+  const [draft, setDraft] = useState({ content: "", workDate: new Date().toISOString().split("T")[0], workTime: "" });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -56,7 +83,7 @@ function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: (
         const data = await api.listApontamentos(task.id);
         setApontamentos(data);
       } catch {
-        alert("Erro ao carregar apontamentos");
+        toast("error", "Erro ao carregar apontamentos");
       } finally {
         setLoading(false);
       }
@@ -66,36 +93,38 @@ function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: (
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (draft.hoursSpent <= 0) return;
+    if (!draft.workDate) return;
     setSaving(true);
     try {
+      const hoursSpent = parseInt(draft.workTime) || 0;
       const created = await api.createApontamento({
         taskId: task.id,
         content: draft.content || null,
-        hoursSpent: draft.hoursSpent,
+        hoursSpent: hoursSpent,
         workDate: draft.workDate
       });
       setApontamentos((prev) => [created, ...prev]);
-      setDraft({ content: "", hoursSpent: 1, workDate: new Date().toISOString().split("T")[0] });
+      setDraft({ content: "", workDate: new Date().toISOString().split("T")[0], workTime: "0" });
       onUpdate();
-      alert("Apontamento adicionado!");
-    } catch {
-      alert("Erro ao criar apontamento");
-    } finally {
+      toast("success", "Apontamento adicionado!");
+} catch {
+        toast("error", "Erro ao criar apontamento");
+      } finally {
       setSaving(false);
     }
   }
 
   async function onDelete(a: Apontamento) {
-    if (!confirm("Remover este apontamento?")) return;
+    const result = await confirm("Remover este apontamento?");
+    if (!result.isConfirmed) return;
     try {
       await api.deleteApontamento(a.id);
       setApontamentos((prev) => prev.filter((x) => x.id !== a.id));
       onUpdate();
-      alert("Apontamento removido!");
-    } catch {
-      alert("Erro ao remover");
-    }
+      toast("success", "Apontamento removido!");
+} catch {
+      toast("error", "Erro ao remover");
+      }
   }
 
   return (
@@ -111,22 +140,24 @@ function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: (
         <form className="mb-6 grid gap-3 rounded-xl border border-slate-700 bg-slate-800/50 p-4" onSubmit={onSubmit}>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs text-slate-400">Data do trabalho</label>
-              <input
-                type="date"
-                value={draft.workDate}
-                onChange={(e) => setDraft((d) => ({ ...d, workDate: e.target.value }))}
-                className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+              <label className="mb-1 block text-xs text-slate-400">Data</label>
+              <DatePicker
+                selected={draft.workDate ? new Date(draft.workDate + "T00:00:00") : null}
+                onChange={(date: Date | null) => setDraft((d) => ({ ...d, workDate: date ? date.toISOString().split("T")[0] : "" }))}
+                dateFormat="dd/MM/yyyy"
+                className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none"
+                placeholderText="Selecione a data"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-slate-400">Horas dedicadas</label>
+              <label className="mb-1 block text-xs text-slate-400">Horas</label>
               <input
                 type="number"
-                min="1"
-                value={draft.hoursSpent}
-                onChange={(e) => setDraft((d) => ({ ...d, hoursSpent: parseInt(e.target.value) || 0 }))}
-                className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                min="0"
+                value={draft.workTime}
+                onChange={(e) => setDraft((d) => ({ ...d, workTime: e.target.value }))}
+                className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500"
+                placeholder="0"
               />
             </div>
           </div>
@@ -155,7 +186,7 @@ function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: (
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs text-slate-400">{formatDate(a.workDate)}</span>
                   <div className="flex items-center gap-2">
-                    <span className="rounded bg-indigo-900/40 px-2 py-0.5 text-xs text-indigo-200">{a.hoursSpent}h</span>
+                    <span className="rounded bg-indigo-900/40 px-2 py-0.5 text-xs text-indigo-200">{formatHours(a.hoursSpent)}</span>
                     <button onClick={() => onDelete(a)} className="text-xs text-red-400 hover:text-red-300">Excluir</button>
                   </div>
                 </div>
@@ -185,9 +216,9 @@ export function App() {
     setLoading(true);
     try {
       setTasks(await api.listTasks());
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao carregar");
-    } finally {
+} catch (e) {
+        toast("error", e instanceof Error ? e.message : "Erro ao carregar");
+      } finally {
       setLoading(false);
     }
   }
@@ -228,10 +259,10 @@ export function App() {
       });
       setTasks((prev) => [created, ...prev]);
       setDraft({ title: "", description: "", deadline: "", estimatedHours: 0 });
-      alert("Task criada!");
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao criar");
-    }
+      toast("success", "Task criada!");
+} catch (e) {
+        toast("error", e instanceof Error ? e.message : "Erro ao criar");
+      }
   }
 
   async function onToggleCompleted(task: Task) {
@@ -239,7 +270,7 @@ export function App() {
       const updated = await api.updateTask(task.id, { completed: !task.completed });
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao atualizar");
+      toast("error", e instanceof Error ? e.message : "Erro ao atualizar");
     }
   }
 
@@ -248,18 +279,20 @@ export function App() {
       const updated = await api.updateTask(task.id, { status });
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao atualizar");
+      toast("error", e instanceof Error ? e.message : "Erro ao atualizar");
     }
   }
 
   async function onDelete(task: Task) {
+    const result = await confirm("Remover esta task?");
+    if (!result.isConfirmed) return;
     try {
       await api.deleteTask(task.id);
       setTasks((prev) => prev.filter((t) => t.id !== task.id));
       if (editingId === task.id) setEditingId(null);
-      alert("Task removida!");
+toast("success", "Task removida!");
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao remover");
+      toast("error", e instanceof Error ? e.message : "Erro ao remover");
     }
   }
 
@@ -280,9 +313,9 @@ export function App() {
       setTasks((prev) => prev.map((t) => (t.id === editingTask.id ? updated : t)));
       setEditingId(null);
       setDraft({ title: "", description: "", deadline: "", estimatedHours: 0 });
-      alert("Task atualizada!");
+toast("success", "Task atualizada!");
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao salvar");
+      toast("error", e instanceof Error ? e.message : "Erro ao salvar");
     }
   }
 
@@ -331,11 +364,24 @@ export function App() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs text-slate-400">Deadline</label>
-                <input type="date" value={draft.deadline} onChange={(e) => setDraft((d) => ({ ...d, deadline: e.target.value }))} className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm outline-none focus:border-slate-600" />
+                <DatePicker
+                  selected={draft.deadline ? new Date(draft.deadline + "T00:00:00") : null}
+                  onChange={(date: Date | null) => setDraft((d) => ({ ...d, deadline: date ? date.toISOString().split("T")[0] : "" }))}
+                  dateFormat="dd/MM/yyyy"
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-600"
+                  placeholderText="Selecione a data"
+                />
               </div>
               <div>
                 <label className="mb-1 block text-xs text-slate-400">Horas Estimadas</label>
-                <input type="number" min="0" value={draft.estimatedHours} onChange={(e) => setDraft((d) => ({ ...d, estimatedHours: parseInt(e.target.value) || 0 }))} className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm outline-none focus:border-slate-600" />
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.estimatedHours}
+                  onChange={(e) => setDraft((d) => ({ ...d, estimatedHours: parseInt(e.target.value) || 0 }))}
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-600"
+                  placeholder="0"
+                />
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -392,27 +438,31 @@ export function App() {
                       </div>
                       <div>
                         <span className="block text-xs text-slate-500">Executado</span>
-                        <span className="text-sm text-slate-300">{t.executedHours}h</span>
+                        <span className="text-sm text-slate-300">{formatHours(t.executedHours)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-xs text-slate-500">Apontamentos</span>
+                        <span className="text-sm text-slate-300">{t.apontamentosCount ?? 0}</span>
                       </div>
                       <div>
                         <span className="block text-xs text-slate-500">Estouro</span>
                         <span className="text-sm text-slate-300">{t.postponedCount}x</span>
                       </div>
-                      <div className="flex-1">
-                        <span className="block text-xs text-slate-500">Progresso</span>
-                        <div className="mt-1 flex items-center gap-2">
-                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
-                            <div className="h-full bg-indigo-500 transition-all" style={{ width: `${calculatePercent(t)}%` }} />
+<div className="flex-1">
+                          <span className="block text-xs text-slate-500">Progresso</span>
+                          <div className="mt-1 flex items-center gap-2">
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
+                              <div className="h-full bg-indigo-500 transition-all" style={{ width: `${calculatePercent(t)}%` }} />
+                            </div>
+                            <span className="text-sm text-slate-300">{calculatePercent(t)}%</span>
                           </div>
-                          <span className="text-sm text-slate-300">{calculatePercent(t)}%</span>
                         </div>
-                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs text-slate-500">Status:</span>
-                      <select value={t.status} onChange={(e) => onChangeStatus(t, e.target.value as TaskStatus)} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300">
-                        {taskStatuses.map((s) => <option key={s} value={s}>{s === "pendente" ? "Pendente" : s === "em_execução" ? "Em Execução" : s === "concluída" ? "Concluída" : "Cancelada"}</option>)}
+                      <select value={t.status} onChange={(e) => onChangeStatus(t, e.target.value as TaskStatus)} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 focus:outline-none focus:border-slate-500">
+                        {taskStatuses.map((s) => <option key={s} value={s} className="bg-slate-900">{s === "pendente" ? "Pendente" : s === "em_execução" ? "Em Execução" : s === "concluída" ? "Concluída" : "Cancelada"}</option>)}
                       </select>
                       <button onClick={() => setApontamentosTask(t)} className="rounded-lg border border-indigo-800 bg-indigo-950/30 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-950/50">+ Apontamentos</button>
                     </div>

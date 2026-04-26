@@ -48,7 +48,14 @@ tasksRouter.use((_req, res, next) => {
 tasksRouter.get("/", async (_req, res) => {
   const repo = AppDataSource.getRepository("Task");
   const tasks = await repo.find({ order: { createdAt: "DESC" } });
-  return res.json(tasks);
+  const apontRepo = AppDataSource.getRepository("Apontamento");
+  const tasksWithCount = await Promise.all(
+    tasks.map(async (t) => {
+      const count = await apontRepo.count({ where: { taskId: t.id } });
+      return { ...t, apontamentosCount: count };
+    })
+  );
+  return res.json(tasksWithCount);
 });
 
 tasksRouter.post("/", async (req, res) => {
@@ -142,6 +149,17 @@ tasksRouter.get("/:id/apontamentos", async (req, res) => {
   const repo = AppDataSource.getRepository("Apontamento");
   const apontamentos = await repo.find({ where: { taskId: id }, order: { createdAt: "DESC" } });
   return res.json(apontamentos);
+});
+
+tasksRouter.get("/:id/apontamentos/count", async (req, res) => {
+  const { id } = req.params;
+  const taskRepo = AppDataSource.getRepository("Task");
+  const task = await taskRepo.findOneBy({ id });
+  if (!task) return res.status(404).json({ error: "Task não encontrada" });
+
+  const repo = AppDataSource.getRepository("Apontamento");
+  const count = await repo.count({ where: { taskId: id } });
+  return res.json({ count });
 });
 
 tasksRouter.post("/apontamentos", async (req, res) => {
