@@ -3,6 +3,8 @@ import cors from "cors";
 import { AppDataSource } from "./db/data-source.js";
 import { env } from "./shared/env.js";
 import { tasksRouter } from "./routes/tasks.js";
+import { authRouter } from "./routes/auth.js";
+import { authMiddleware } from "./middleware/auth.js";
 const app = express();
 app.use(cors({
     origin: env.FRONTEND_ORIGIN,
@@ -13,7 +15,8 @@ app.get("/health", (_req, res) => res.json({
     ok: true,
     db: AppDataSource.isInitialized ? "connected" : "connecting"
 }));
-app.use("/tasks", tasksRouter);
+app.use("/auth", authRouter);
+app.use("/tasks", authMiddleware, tasksRouter);
 async function initDbWithRetry() {
     let attempt = 0;
     while (!AppDataSource.isInitialized) {

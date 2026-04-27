@@ -32,14 +32,25 @@ export type Health = {
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:4000";
 
+function getToken(): string | null {
+  return localStorage.getItem("token");
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {})
     }
   });
+
+  if (res.status === 401) {
+    localStorage.removeItem("token");
+    throw new Error("Unauthorized");
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -50,7 +61,13 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+export type LoginResponse = {
+  token: string;
+};
+
 export const api = {
+  login: (username: string, password: string) =>
+    http<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   health: () => http<Health>("/health"),
   listTasks: () => http<Task[]>("/tasks"),
   createTask: (data: { title: string; description?: string | null; deadline?: string | null; estimatedHours?: number; postponedCount?: number }) =>

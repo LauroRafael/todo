@@ -31,25 +31,8 @@ const ApontamentoSchema = new EntitySchema({
     taskId: { type: "varchar", length: 36 },
     createdAt: { type: "timestamp", createDate: true },
     updatedAt: { type: "timestamp", updateDate: true }
-  },
-  relations: {
-    task: {
-      type: "many-to-one",
-      target: "Task",
-      nullable: false,
-      onDelete: "CASCADE"
-    }
   }
 });
-
-TaskSchema.relations = {
-  apontamentos: {
-    type: "one-to-many",
-    target: "Apontamento",
-    cascade: true,
-    onDelete: "CASCADE"
-  }
-};
 
 export const AppDataSource = new DataSource({
   type: "mysql",
