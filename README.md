@@ -39,11 +39,19 @@ Access the app at **http://localhost:5173**
 - Backend: `http://localhost:4000`
 - MySQL: `127.0.0.1:3305`
 
-## Support
+### 💖 Support the Project
 
-If you find this project helpful, consider supporting its development:
+If you enjoy this project and want to support its development, consider buying me a coffee!
 
-[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/laurorafael)
+<div align="center">
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Me-FF5E5B?logo=ko-fi&logoColor=white&style=for-the-badge)](https://ko-fi.com/laurorafael)
+
+<a href="https://ko-fi.com/laurorafael">
+  <img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Buy Me a Coffee at ko-fi.com" height="50" />
+</a>
+
+</div>
 
 ---
 
