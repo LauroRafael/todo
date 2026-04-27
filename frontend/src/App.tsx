@@ -70,6 +70,60 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   );
 }
 
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await api.login(username, password);
+      localStorage.setItem("token", res.token);
+      onLogin();
+    } catch {
+      setError("Usuário ou senha inválidos");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-950">
+      <form onSubmit={handleLogin} className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-8">
+        <h1 className="mb-6 text-center text-2xl font-semibold text-slate-100">TaskFlow</h1>
+        {error ? <p className="mb-4 rounded-lg bg-red-900/30 p-2 text-center text-sm text-red-200">{error}</p> : null}
+        <div className="mb-4">
+          <label className="mb-1 block text-xs text-slate-400">Usuário</label>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-indigo-500"
+            placeholder="admin"
+          />
+        </div>
+        <div className="mb-6">
+          <label className="mb-1 block text-xs text-slate-400">Senha</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-indigo-500"
+            placeholder="••••••"
+          />
+        </div>
+        <button type="submit" disabled={loading} className="w-full rounded-xl bg-indigo-600 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60">
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: () => void; onUpdate: () => void }) {
   const [apontamentos, setApontamentos] = useState<Apontamento[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,9 +161,9 @@ function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: (
       setDraft({ content: "", workDate: new Date().toISOString().split("T")[0], workTime: "0" });
       onUpdate();
       toast("success", "Apontamento adicionado!");
-} catch {
-        toast("error", "Erro ao criar apontamento");
-      } finally {
+    } catch {
+      toast("error", "Erro ao criar apontamento");
+    } finally {
       setSaving(false);
     }
   }
@@ -122,9 +176,9 @@ function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: (
       setApontamentos((prev) => prev.filter((x) => x.id !== a.id));
       onUpdate();
       toast("success", "Apontamento removido!");
-} catch {
+    } catch {
       toast("error", "Erro ao remover");
-      }
+    }
   }
 
   return (
@@ -208,24 +262,23 @@ export function App() {
   const [draft, setDraft] = useState<Draft>({ title: "", description: "", deadline: "", estimatedHours: 0 });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [apontamentosTask, setApontamentosTask] = useState<Task | null>(null);
+  const [screen, setScreen] = useState<"loading" | "login" | "tasks">("loading");
   const editingTask = tasks.find((t) => t.id === editingId) ?? null;
-
-  const taskStatuses: TaskStatus[] = ["pendente", "em_execução", "concluída", "cancelada"];
 
   async function refresh() {
     setLoading(true);
     try {
       setTasks(await api.listTasks());
-} catch (e) {
-        toast("error", e instanceof Error ? e.message : "Erro ao carregar");
-      } finally {
+    } catch (e) {
+      if (e instanceof Error && e.message === "Unauthorized") {
+        setScreen("login");
+        return;
+      }
+      toast("error", e instanceof Error ? e.message : "Erro ao carregar");
+    } finally {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    void refresh();
-  }, []);
 
   async function refreshHealth() {
     setHealthLoading(true);
@@ -239,10 +292,40 @@ export function App() {
   }
 
   useEffect(() => {
+    const token = localStorage.getItem("token");
+    setScreen(!!token ? "tasks" : "login");
+  }, []);
+
+  useEffect(() => {
+    if (screen === "tasks") {
+      void refresh();
+    }
+  }, [screen]);
+
+  useEffect(() => {
     void refreshHealth();
     const id = window.setInterval(() => void refreshHealth(), 10_000);
     return () => window.clearInterval(id);
   }, []);
+
+  function handleLogout() {
+    localStorage.removeItem("token");
+    setScreen("login");
+  }
+
+  if (screen === "loading") {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-slate-400">Carregando...</div>
+      </div>
+    );
+  }
+
+  const taskStatuses: TaskStatus[] = ["pendente", "em_execução", "concluída", "cancelada"];
+
+  if (screen === "login") {
+    return <LoginScreen onLogin={() => setScreen("tasks")} />;
+  }
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -260,9 +343,9 @@ export function App() {
       setTasks((prev) => [created, ...prev]);
       setDraft({ title: "", description: "", deadline: "", estimatedHours: 0 });
       toast("success", "Task criada!");
-} catch (e) {
-        toast("error", e instanceof Error ? e.message : "Erro ao criar");
-      }
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Erro ao criar");
+    }
   }
 
   async function onToggleCompleted(task: Task) {
@@ -290,7 +373,7 @@ export function App() {
       await api.deleteTask(task.id);
       setTasks((prev) => prev.filter((t) => t.id !== task.id));
       if (editingId === task.id) setEditingId(null);
-toast("success", "Task removida!");
+      toast("success", "Task removida!");
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Erro ao remover");
     }
@@ -313,7 +396,7 @@ toast("success", "Task removida!");
       setTasks((prev) => prev.map((t) => (t.id === editingTask.id ? updated : t)));
       setEditingId(null);
       setDraft({ title: "", description: "", deadline: "", estimatedHours: 0 });
-toast("success", "Task atualizada!");
+      toast("success", "Task atualizada!");
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Erro ao salvar");
     }
@@ -345,6 +428,9 @@ toast("success", "Task atualizada!");
             <p className="mt-1 text-sm text-slate-400">Gerenciador de Tasks com Apontamentos</p>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={handleLogout} className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800" title="Sair">
+              Sair
+            </button>
             <span className={["inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", health?.ok ? "border-emerald-900/40 bg-emerald-950/30 text-emerald-200" : "border-slate-800 bg-slate-900 text-slate-200"].join(" ")} title="Status do backend">
               <span className={["h-2 w-2 rounded-full", health?.ok ? "bg-emerald-400" : "bg-slate-500"].join(" ")} aria-hidden="true" />
               {health?.ok ? `Backend OK • DB ${health.db ?? "?"}` : "Backend offline"}
@@ -448,15 +534,15 @@ toast("success", "Task atualizada!");
                         <span className="block text-xs text-slate-500">Estouro</span>
                         <span className="text-sm text-slate-300">{t.postponedCount}x</span>
                       </div>
-<div className="flex-1">
-                          <span className="block text-xs text-slate-500">Progresso</span>
-                          <div className="mt-1 flex items-center gap-2">
-                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
-                              <div className="h-full bg-indigo-500 transition-all" style={{ width: `${calculatePercent(t)}%` }} />
-                            </div>
-                            <span className="text-sm text-slate-300">{calculatePercent(t)}%</span>
+                      <div className="flex-1">
+                        <span className="block text-xs text-slate-500">Progresso</span>
+                        <div className="mt-1 flex items-center gap-2">
+                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
+                            <div className="h-full bg-indigo-500 transition-all" style={{ width: `${calculatePercent(t)}%` }} />
                           </div>
+                          <span className="text-sm text-slate-300">{calculatePercent(t)}%</span>
                         </div>
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">

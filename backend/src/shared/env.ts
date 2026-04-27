@@ -4,6 +4,7 @@ import { z } from "zod";
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   NODE_ENV: z.string().default("development"),
+  JWT_SECRET: z.string().min(1).default("taskflow-secret-key"),
 
   DB_HOST: z.string().min(1),
   DB_PORT: z.coerce.number().int().positive().default(3306),
