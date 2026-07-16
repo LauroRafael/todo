@@ -1,5 +1,11 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import { z } from "zod";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 const envSchema = z
   .object({
@@ -17,7 +23,11 @@ const envSchema = z
   })
   .superRefine((val, ctx) => {
     if (val.NODE_ENV === "production" && val.JWT_SECRET === "taskflow-secret-key") {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "JWT_SECRET não pode ser o valor default em produção", path: ["JWT_SECRET"] });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "JWT_SECRET não pode ser o valor default em produção",
+        path: ["JWT_SECRET"]
+      });
     }
   });
 
