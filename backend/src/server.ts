@@ -1,5 +1,8 @@
 import express from "express";
+import type { Request, Response, NextFunction } from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { AppDataSource } from "./db/data-source.js";
 import { env } from "./shared/env.js";
 import { tasksRouter } from "./routes/tasks.js";
@@ -8,13 +11,22 @@ import { authMiddleware } from "./middleware/auth.js";
 
 const app = express();
 
+app.use(helmet());
 app.use(
   cors({
     origin: env.FRONTEND_ORIGIN,
     credentials: true
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "256kb" }));
+app.use(
+  rateLimit({
+    windowMs: 60_000,
+    limit: 200,
+    standardHeaders: "draft-7",
+    legacyHeaders: false
+  })
+);
 
 app.get("/health", (_req, res) =>
   res.json({
@@ -24,6 +36,16 @@ app.get("/health", (_req, res) =>
 );
 app.use("/auth", authRouter);
 app.use("/tasks", authMiddleware, tasksRouter);
+
+app.use((_req: Request, res: Response) => {
+  res.status(404).json({ error: "Rota não encontrada" });
+});
+
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("[error]", err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: "Erro interno do servidor" });
+});
 
 async function initDbWithRetry() {
   let attempt = 0;
@@ -47,4 +69,3 @@ app.listen(env.PORT, () => {
 });
 
 void initDbWithRetry();
-
