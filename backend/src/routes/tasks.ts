@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 import { AppDataSource } from "../db/data-source.js";
+import { logTaskEvent } from "../services/audit.js";
+import type { AuthRequest } from "../middleware/auth.js";
 
 const TaskStatus = ["pendente", "em_execução", "concluída", "cancelada"] as const;
 
@@ -8,8 +10,7 @@ const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(5000).optional().nullable(),
   deadline: z.string().optional().nullable(),
-  estimatedHours: z.number().int().min(0).optional(),
-  postponedCount: z.number().int().min(0).optional()
+  estimatedHours: z.number().min(0).optional()
 });
 
 const updateTaskSchema = z.object({
@@ -18,23 +19,28 @@ const updateTaskSchema = z.object({
   status: z.enum(TaskStatus).optional(),
   completed: z.boolean().optional(),
   deadline: z.string().optional().nullable(),
-  estimatedHours: z.number().int().min(0).optional(),
-  executedHours: z.number().int().min(0).optional(),
-  postponedCount: z.number().int().min(0).optional()
+  estimatedHours: z.number().min(0).optional()
 });
 
 const createApontamentoSchema = z.object({
   taskId: z.string().uuid(),
   content: z.string().trim().max(5000).optional().nullable(),
-  hoursSpent: z.number().int().min(0),
+  hoursSpent: z.number().min(0),
   workDate: z.string().optional().nullable()
 });
 
 const updateApontamentoSchema = z.object({
   content: z.string().trim().max(5000).optional().nullable(),
-  hoursSpent: z.number().int().min(0).optional(),
+  hoursSpent: z.number().min(0).optional(),
   workDate: z.string().optional().nullable()
 });
+
+function parseDate(value: unknown): Date | null {
+  if (typeof value !== "string" || !value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+}
 
 export const tasksRouter = Router();
 
@@ -63,21 +69,19 @@ tasksRouter.post("/", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const repo = AppDataSource.getRepository("Task");
-  let deadline: Date | null = null;
-  if (parsed.data.deadline) {
-    const [year, month, day] = parsed.data.deadline.split("-").map(Number);
-    deadline = new Date(Date.UTC(year, month - 1, day));
-  }
-  
+  const deadline = parseDate(parsed.data.deadline);
+
   const task = repo.create({
     title: parsed.data.title,
     description: parsed.data.description ?? null,
     deadline,
     estimatedHours: parsed.data.estimatedHours ?? 0,
-    postponedCount: parsed.data.postponedCount ?? 0,
-    completed: false
+    postponedCount: 0,
+    completed: false,
+    status: "pendente"
   });
   await repo.save(task);
+  await logTaskEvent(req as AuthRequest, task.id, "task_created", { title: task.title });
   return res.status(201).json(task);
 });
 
@@ -91,40 +95,50 @@ tasksRouter.put("/:id", async (req, res) => {
   if (!task) return res.status(404).json({ error: "Task não encontrada" });
 
   const oldExecutedHours = task.executedHours;
-  const oldDeadline = task.deadline;
+  const oldDeadlineTime = task.deadline ? new Date(task.deadline).getTime() : null;
+  const oldStatus = task.status;
 
   const updateData: Record<string, unknown> = { ...parsed.data };
-  if (updateData["deadline"] && typeof updateData["deadline"] === "string") {
-    const [year, month, day] = updateData["deadline"].split("-").map(Number);
-    updateData["deadline"] = new Date(Date.UTC(year, month - 1, day));
+  if (updateData["deadline"] !== undefined) {
+    updateData["deadline"] = parseDate(updateData["deadline"]);
   }
 
-  repo.merge(task, updateData);
-  await repo.save(task);
+  // Sincroniza completed <-> status="concluída"
+  if (parsed.data.status === "concluída" && !task.completed) {
+    updateData["completed"] = true;
+  } else if (
+    parsed.data.status &&
+    parsed.data.status !== "concluída" &&
+    task.completed &&
+    parsed.data.completed === undefined
+  ) {
+    updateData["completed"] = false;
+  }
+  if (parsed.data.completed === true && task.status !== "concluída") {
+    updateData["status"] = "concluída";
+  } else if (parsed.data.completed === false && task.status === "concluída" && parsed.data.status === undefined) {
+    updateData["status"] = "em_execução";
+  }
 
-  const newExecutedHours = typeof updateData["executedHours"] === "number" 
-    ? updateData["executedHours"] 
-    : task.executedHours;
-  const newDeadline = updateData["deadline"] 
-    ? updateData["deadline"] as Date 
-    : task.deadline;
-  const newEstimatedHours = typeof updateData["estimatedHours"] === "number" 
-    ? updateData["estimatedHours"] 
-    : task.estimatedHours;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await repo.update({ id }, updateData as any);
+  const updatedTask = await repo.findOneBy({ id });
+  if (!updatedTask) return res.status(404).json({ error: "Task não encontrada" });
+
+  const newExecutedHours = updatedTask.executedHours;
+  const newDeadlineTime = updatedTask.deadline ? new Date(updatedTask.deadline).getTime() : null;
+  const newEstimatedHours = updatedTask.estimatedHours;
 
   const now = new Date();
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
   let postponeIncrement = 0;
 
-  const oldDeadlineTime = oldDeadline ? new Date(oldDeadline).getTime() : null;
-  const newDeadlineTime = newDeadline ? new Date(newDeadline).getTime() : null;
-
-  if (oldDeadlineTime && newDeadlineTime && oldDeadlineTime !== newDeadlineTime) {
+  if (oldDeadlineTime && newDeadlineTime && newDeadlineTime < oldDeadlineTime) {
     postponeIncrement = 1;
   }
 
-  if (newDeadlineTime && newDeadlineTime < today.getTime() && !task.completed) {
+  if (newDeadlineTime && newDeadlineTime < today.getTime() && !updatedTask.completed) {
     postponeIncrement = 1;
   }
 
@@ -133,11 +147,21 @@ tasksRouter.put("/:id", async (req, res) => {
   }
 
   if (postponeIncrement > 0) {
-    task.postponedCount = (task.postponedCount || 0) + postponeIncrement;
-    await repo.save(task);
+    const newCount = (updatedTask.postponedCount || 0) + postponeIncrement;
+    await repo.update({ id: updatedTask.id }, { postponedCount: newCount });
+    updatedTask.postponedCount = newCount;
+    await logTaskEvent(req as AuthRequest, id, "task_postponed", {
+      reason: "deadline_or_hours_exceeded",
+      count: newCount
+    });
   }
 
-  return res.json(task);
+  if (oldStatus !== updatedTask.status) {
+    await logTaskEvent(req as AuthRequest, id, "task_status_changed", { from: oldStatus, to: updatedTask.status });
+  }
+  await logTaskEvent(req as AuthRequest, id, "task_updated", { fields: Object.keys(parsed.data) });
+
+  return res.json(updatedTask);
 });
 
 tasksRouter.get("/:id/apontamentos", async (req, res) => {
@@ -171,14 +195,8 @@ tasksRouter.post("/apontamentos", async (req, res) => {
   if (!task) return res.status(404).json({ error: "Task não encontrada" });
 
   const repo = AppDataSource.getRepository("Apontamento");
-  let workDate: Date;
-  if (parsed.data.workDate) {
-    const [year, month, day] = parsed.data.workDate.split("-").map(Number);
-    workDate = new Date(Date.UTC(year, month - 1, day));
-  } else {
-    workDate = new Date();
-  }
-  
+  const workDate = parsed.data.workDate ? (parseDate(parsed.data.workDate) ?? new Date()) : new Date();
+
   const apontamento = repo.create({
     taskId: parsed.data.taskId,
     content: parsed.data.content ?? null,
@@ -189,10 +207,9 @@ tasksRouter.post("/apontamentos", async (req, res) => {
 
   const oldExecutedHours = task.executedHours || 0;
   const newExecutedHours = oldExecutedHours + parsed.data.hoursSpent;
-  task.executedHours = newExecutedHours;
-  
+
   let postponeIncrement = 0;
-  
+
   if (task.deadline) {
     const now = new Date();
     const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -201,16 +218,21 @@ tasksRouter.post("/apontamentos", async (req, res) => {
       postponeIncrement = 1;
     }
   }
-  
+
   if (task.estimatedHours > 0 && newExecutedHours > task.estimatedHours && oldExecutedHours <= task.estimatedHours) {
     postponeIncrement = 1;
   }
-  
+
+  const taskUpdate: Record<string, number> = { executedHours: newExecutedHours };
   if (postponeIncrement > 0) {
-    task.postponedCount = (task.postponedCount || 0) + postponeIncrement;
+    taskUpdate.postponedCount = (task.postponedCount || 0) + postponeIncrement;
   }
-  
-  await taskRepo.save(task);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await taskRepo.update({ id: task.id }, taskUpdate as any);
+  await logTaskEvent(req as AuthRequest, task.id, "apontamento_added", {
+    apontamentoId: apontamento.id,
+    hoursSpent: parsed.data.hoursSpent
+  });
 
   return res.status(201).json(apontamento);
 });
@@ -227,21 +249,29 @@ tasksRouter.put("/apontamentos/:id", async (req, res) => {
   const oldHours = apontamento.hoursSpent;
   const newHours = parsed.data.hoursSpent ?? oldHours;
 
-  repo.merge(apontamento, parsed.data);
-  if (parsed.data.workDate) {
-    const [year, month, day] = parsed.data.workDate.split("-").map(Number);
-    apontamento.workDate = new Date(Date.UTC(year, month - 1, day));
+  const apontUpdate: Record<string, unknown> = { ...parsed.data };
+  if (apontUpdate["workDate"]) {
+    apontUpdate["workDate"] = parseDate(apontUpdate["workDate"]) ?? apontamento.workDate;
   }
-  await repo.save(apontamento);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await repo.update({ id }, apontUpdate as any);
 
   const taskRepo = AppDataSource.getRepository("Task");
-  const task = await taskRepo.findOneBy({ id: apontamento.taskId });
-  if (task) {
-    task.executedHours = task.executedHours - oldHours + newHours;
-    await taskRepo.save(task);
+  if (apontamento.taskId) {
+    const task = await taskRepo.findOneBy({ id: apontamento.taskId });
+    if (task) {
+      const diff = newHours - oldHours;
+      await taskRepo.update({ id: apontamento.taskId }, { executedHours: Math.max(0, task.executedHours + diff) });
+      await logTaskEvent(req as AuthRequest, apontamento.taskId, "apontamento_updated", {
+        apontamentoId: id,
+        oldHours,
+        newHours
+      });
+    }
   }
 
-  return res.json(apontamento);
+  const updated = await repo.findOneBy({ id });
+  return res.json(updated ?? apontamento);
 });
 
 tasksRouter.delete("/apontamentos/:id", async (req, res) => {
@@ -258,8 +288,12 @@ tasksRouter.delete("/apontamentos/:id", async (req, res) => {
   const taskRepo = AppDataSource.getRepository("Task");
   const task = await taskRepo.findOneBy({ id: taskId });
   if (task) {
-    task.executedHours = Math.max(0, task.executedHours - hoursToRemove);
-    await taskRepo.save(task);
+    const newHours = Math.max(0, task.executedHours - hoursToRemove);
+    await taskRepo.update({ id: taskId }, { executedHours: newHours });
+    await logTaskEvent(req as AuthRequest, taskId, "apontamento_removed", {
+      apontamentoId: id,
+      hoursRemoved: hoursToRemove
+    });
   }
 
   return res.status(204).send();
@@ -272,5 +306,6 @@ tasksRouter.delete("/:id", async (req, res) => {
   if (!task) return res.status(404).json({ error: "Task não encontrada" });
 
   await repo.remove(task);
+  await logTaskEvent(req as AuthRequest, id, "task_deleted", { title: task.title });
   return res.status(204).send();
 });

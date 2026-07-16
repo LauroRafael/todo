@@ -70,9 +70,9 @@ export const api = {
     http<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   health: () => http<Health>("/health"),
   listTasks: () => http<Task[]>("/tasks"),
-  createTask: (data: { title: string; description?: string | null; deadline?: string | null; estimatedHours?: number; postponedCount?: number }) =>
+  createTask: (data: { title: string; description?: string | null; deadline?: string | null; estimatedHours?: number }) =>
     http<Task>("/tasks", { method: "POST", body: JSON.stringify(data) }),
-  updateTask: (id: string, data: { title?: string; description?: string | null; status?: TaskStatus; completed?: boolean; deadline?: string | null; estimatedHours?: number; executedHours?: number; postponedCount?: number }) =>
+  updateTask: (id: string, data: { title?: string; description?: string | null; status?: TaskStatus; completed?: boolean; deadline?: string | null; estimatedHours?: number }) =>
     http<Task>(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteTask: (id: string) => http<void>(`/tasks/${id}`, { method: "DELETE" }),
   listApontamentos: (taskId: string) => http<Apontamento[]>(`/tasks/${taskId}/apontamentos`),
