@@ -4,7 +4,18 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import Swal from "sweetalert2";
 import withReactContent from "sweetalert2-react-content";
-import { api, type Apontamento, type Health, type Task, type TaskStatus } from "./lib/api";
+import { api, type Apontamento, type Health, type Task, type TaskStatus, type User } from "./lib/api";
+
+function parseToken(
+  token: string
+): { username: string; role: string; displayName?: string; impersonatedBy?: string } | null {
+  try {
+    const payload = atob(token.split(".")[1]);
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
 
 const SweetAlert = withReactContent(Swal);
 
@@ -293,6 +304,378 @@ function ApontamentosPanel({ task, onClose, onUpdate }: { task: Task; onClose: (
   );
 }
 
+function NewTaskModal({ onRefresh, onClose }: { onRefresh: () => Promise<void>; onClose: () => void }) {
+  const [localDraft, setLocalDraft] = useState<Draft>({ title: "", description: "", deadline: "", estimatedHours: 0 });
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!localDraft.title.trim()) return;
+    setSaving(true);
+    try {
+      await api.createTask({
+        title: localDraft.title.trim(),
+        description: localDraft.description.trim() || undefined,
+        deadline: localDraft.deadline || undefined,
+        estimatedHours: localDraft.estimatedHours || undefined
+      });
+      await onRefresh();
+      onClose();
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Erro ao criar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-700 px-6 py-4">
+          <h3 className="text-lg font-semibold text-slate-100">Nova Task</h3>
+          <button onClick={onClose} className="rounded-lg px-3 py-1 text-slate-400 hover:bg-slate-800">
+            Fechar
+          </button>
+        </div>
+
+        <form className="grid gap-4 p-6" onSubmit={handleSubmit}>
+          <input
+            value={localDraft.title}
+            onChange={(e) => setLocalDraft((d) => ({ ...d, title: e.target.value }))}
+            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-indigo-500"
+            placeholder="Título"
+            maxLength={200}
+          />
+          <textarea
+            value={localDraft.description}
+            onChange={(e) => setLocalDraft((d) => ({ ...d, description: e.target.value }))}
+            className="min-h-20 w-full resize-y rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-indigo-500"
+            placeholder="Descrição (opcional)"
+            maxLength={5000}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Deadline</label>
+              <DatePicker
+                selected={localDraft.deadline ? new Date(localDraft.deadline + "T00:00:00") : null}
+                onChange={(date: Date | null) =>
+                  setLocalDraft((d) => ({ ...d, deadline: date ? date.toISOString().split("T")[0] : "" }))
+                }
+                dateFormat="dd/MM/yyyy"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-indigo-500"
+                placeholderText="Selecione a data"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Tempo Estimado</label>
+              <input
+                type="time"
+                step="60"
+                value={hoursToTime(localDraft.estimatedHours)}
+                onChange={(e) => setLocalDraft((d) => ({ ...d, estimatedHours: timeToHours(e.target.value) }))}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-indigo-500"
+              />
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-xl bg-indigo-600 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
+          >
+            {saving ? "Criando..." : "Criar Task"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function UsersModal({ currentUsername, onClose }: { currentUsername: string; onClose: () => void }) {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [newUser, setNewUser] = useState({ username: "", password: "", role: "user", displayName: "" });
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ username: "", password: "", role: "user", displayName: "" });
+
+  useEffect(() => {
+    void loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadUsers() {
+    setLoading(true);
+    try {
+      setUsers(await api.listUsers());
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Erro ao carregar usuários");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.createUser({
+        username: newUser.username,
+        password: newUser.password,
+        role: newUser.role,
+        displayName: newUser.displayName || undefined
+      });
+      await loadUsers();
+      setShowForm(false);
+      setNewUser({ username: "", password: "", role: "user", displayName: "" });
+      toast("success", "Usuário criado!");
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Erro ao criar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleImpersonate(username: string) {
+    try {
+      const currentToken = localStorage.getItem("token");
+      const res = await api.impersonateUser(username);
+      if (currentToken) localStorage.setItem("adminToken", currentToken);
+      localStorage.setItem("token", res.token);
+      window.location.reload();
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Erro ao impersonar");
+    }
+  }
+
+  function startEdit(u: User) {
+    setEditingId(u.id);
+    setEditDraft({ username: u.username, password: "", role: u.role, displayName: u.displayName });
+  }
+
+  async function handleSaveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingId) return;
+    setSaving(true);
+    try {
+      const data: { password?: string; role?: string; displayName?: string } = {};
+      if (editDraft.password) data.password = editDraft.password;
+      data.role = editDraft.role;
+      if (editDraft.displayName.trim()) data.displayName = editDraft.displayName.trim();
+      await api.updateUser(editingId, data);
+      await loadUsers();
+      setEditingId(null);
+      toast("success", "Usuário atualizado!");
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Erro ao atualizar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(u: User) {
+    const result = await SweetAlert.fire({
+      icon: "warning",
+      title: "Excluir usuário?",
+      text: `Digite "${u.username}" para confirmar a exclusão. Todas as tasks deste usuário também serão excluídas.`,
+      input: "text",
+      inputPlaceholder: u.username,
+      confirmButtonText: "Excluir",
+      confirmButtonColor: "#dc2626",
+      showCancelButton: true,
+      cancelButtonColor: "#64748b",
+      background: "#1e293b",
+      color: "#f1f5f9",
+      preConfirm: (inputValue: string) => {
+        if (inputValue !== u.username) {
+          Swal.showValidationMessage("Nome digitado não corresponde");
+        }
+      }
+    });
+    if (!result.isConfirmed) return;
+    try {
+      await api.deleteUser(u.id);
+      await loadUsers();
+      toast("success", `Usuário "${u.username}" excluído!`);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Erro ao excluir");
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl border border-slate-700 bg-slate-900">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-700 px-6 py-4">
+          <h3 className="text-lg font-semibold text-slate-100">Usuários</h3>
+          <button onClick={onClose} className="rounded-lg px-3 py-1 text-slate-400 hover:bg-slate-800">
+            Fechar
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          {loading ? (
+            <div className="text-center text-sm text-slate-400">Carregando...</div>
+          ) : (
+            <>
+              <ul className="mb-4 space-y-2">
+                {[...users]
+                  .sort((a, b) => (a.username === "admin" ? -1 : b.username === "admin" ? 1 : 0))
+                  .map((u) => (
+                    <li key={u.id}>
+                      {editingId === u.id ? (
+                        <form
+                          onSubmit={handleSaveEdit}
+                          className="space-y-2 rounded-lg border border-indigo-700 bg-slate-800/50 p-3"
+                        >
+                          <input
+                            value={editDraft.username}
+                            disabled
+                            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-500 outline-none"
+                          />
+                          <input
+                            value={editDraft.displayName}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, displayName: e.target.value }))}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none"
+                            placeholder="Nome de exibição"
+                            required
+                          />
+                          <input
+                            type="password"
+                            value={editDraft.password}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, password: e.target.value }))}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none"
+                            placeholder="Nova senha (deixe vazio para manter)"
+                          />
+                          <select
+                            value={editDraft.role}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, role: e.target.value }))}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none"
+                          >
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                          <div className="flex gap-2">
+                            <button
+                              type="submit"
+                              disabled={saving}
+                              className="flex-1 rounded-lg bg-indigo-600 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-60"
+                            >
+                              {saving ? "Salvando..." : "Salvar"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingId(null)}
+                              className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <div className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-slate-100">{u.displayName || u.username}</span>
+                            <span className="text-xs text-slate-500">@{u.username}</span>
+                            <span className="rounded bg-slate-700 px-1.5 py-0.5 text-xs text-slate-300">{u.role}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {u.username !== currentUsername ? (
+                              <button
+                                onClick={() => void handleImpersonate(u.username)}
+                                className="rounded-lg border border-indigo-800 bg-indigo-950/30 px-3 py-1 text-xs text-indigo-200 hover:bg-indigo-950/50"
+                              >
+                                Entrar como
+                              </button>
+                            ) : null}
+                            <button
+                              onClick={() => startEdit(u)}
+                              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                            >
+                              Editar
+                            </button>
+                            {u.username !== currentUsername ? (
+                              <button
+                                onClick={() => void handleDelete(u)}
+                                className="rounded-lg border border-red-900/40 bg-red-950/30 px-3 py-1 text-xs text-red-200 hover:bg-red-950/50"
+                              >
+                                Excluir
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+              </ul>
+
+              {!showForm ? (
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="w-full rounded-lg bg-indigo-600 py-2 text-sm text-white hover:bg-indigo-500"
+                >
+                  + Adicionar Usuário
+                </button>
+              ) : (
+                <form
+                  onSubmit={handleCreate}
+                  className="space-y-3 rounded-lg border border-slate-700 bg-slate-800/50 p-4"
+                >
+                  <input
+                    value={newUser.username}
+                    onChange={(e) => setNewUser((u) => ({ ...u, username: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none"
+                    placeholder="Nome de usuário"
+                    required
+                  />
+                  <input
+                    value={newUser.displayName}
+                    onChange={(e) => setNewUser((u) => ({ ...u, displayName: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none"
+                    placeholder="Nome de exibição"
+                    required
+                  />
+                  <input
+                    type="password"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser((u) => ({ ...u, password: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none"
+                    placeholder="Senha"
+                    required
+                  />
+                  <select
+                    value={newUser.role}
+                    onChange={(e) => setNewUser((u) => ({ ...u, role: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none"
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="flex-1 rounded-lg bg-indigo-600 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-60"
+                    >
+                      {saving ? "Salvando..." : "Salvar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowForm(false)}
+                      className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -302,6 +685,17 @@ export function App() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [apontamentosTask, setApontamentosTask] = useState<Task | null>(null);
   const [screen, setScreen] = useState<"loading" | "login" | "tasks">("loading");
+  const [userInfo, setUserInfo] = useState<{
+    username: string;
+    role: string;
+    displayName?: string;
+    impersonatedBy?: string;
+  } | null>(null);
+  const [tab, setTab] = useState<"tasks" | "concluídas" | "canceladas">("tasks");
+  const [page, setPage] = useState(1);
+  const [showUsers, setShowUsers] = useState(false);
+  const [showNewTask, setShowNewTask] = useState(false);
+  const PER_PAGE = 10;
   const editingTask = tasks.find((t) => t.id === editingId) ?? null;
 
   async function refresh() {
@@ -332,6 +726,10 @@ export function App() {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
+    if (token) {
+      const info = parseToken(token);
+      setUserInfo(info);
+    }
     setScreen(token ? "tasks" : "login");
   }, []);
 
@@ -347,8 +745,25 @@ export function App() {
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    setPage(1);
+  }, [tab]);
+
+  function handleStopImpersonation() {
+    const adminToken = localStorage.getItem("adminToken");
+    if (adminToken) {
+      localStorage.setItem("token", adminToken);
+      localStorage.removeItem("adminToken");
+      window.location.reload();
+    }
+  }
+
   function handleLogout() {
     localStorage.removeItem("token");
+    localStorage.removeItem("adminToken");
+    setUserInfo(null);
+    setTab("tasks");
+    setPage(1);
     setScreen("login");
   }
 
@@ -362,8 +777,25 @@ export function App() {
 
   const taskStatuses: TaskStatus[] = ["pendente", "em_execução", "concluída", "cancelada"];
 
+  const filteredTasks = tasks.filter((t) => {
+    if (tab === "tasks") return t.status === "pendente" || t.status === "em_execução";
+    if (tab === "concluídas") return t.status === "concluída";
+    return t.status === "cancelada";
+  });
+  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PER_PAGE));
+  const safePage = Math.min(page, totalPages);
+  const paginatedTasks = filteredTasks.slice((safePage - 1) * PER_PAGE, safePage * PER_PAGE);
+
   if (screen === "login") {
-    return <LoginScreen onLogin={() => setScreen("tasks")} />;
+    return (
+      <LoginScreen
+        onLogin={() => {
+          const token = localStorage.getItem("token");
+          if (token) setUserInfo(parseToken(token));
+          setScreen("tasks");
+        }}
+      />
+    );
   }
 
   async function onCreate(e: FormEvent) {
@@ -471,6 +903,8 @@ export function App() {
       {apontamentosTask && (
         <ApontamentosPanel task={apontamentosTask} onClose={() => setApontamentosTask(null)} onUpdate={refresh} />
       )}
+      {showUsers && <UsersModal currentUsername={userInfo?.username ?? ""} onClose={() => setShowUsers(false)} />}
+      {showNewTask && <NewTaskModal onRefresh={refresh} onClose={() => setShowNewTask(false)} />}
 
       <div className="mx-auto max-w-4xl px-4 py-10">
         <header className="mb-8 flex items-start justify-between gap-4">
@@ -479,6 +913,36 @@ export function App() {
             <p className="mt-1 text-sm text-slate-400">Gerenciador de Tasks com Apontamentos</p>
           </div>
           <div className="flex items-center gap-2">
+            {userInfo ? (
+              <span className="text-xs text-slate-400">
+                {userInfo.displayName || userInfo.username}
+                {userInfo.impersonatedBy ? (
+                  <span className="ml-1 rounded bg-amber-900/50 px-1.5 py-0.5 text-xs text-amber-200">Simulando</span>
+                ) : (
+                  <span className="ml-1 rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-500">
+                    {userInfo.role}
+                  </span>
+                )}
+              </span>
+            ) : null}
+            {userInfo?.impersonatedBy ? (
+              <button
+                onClick={handleStopImpersonation}
+                className="rounded-lg border border-amber-800 bg-amber-950/30 px-3 py-2 text-sm text-amber-200 hover:bg-amber-950/50"
+                title="Parar simulação e voltar ao admin"
+              >
+                Parar Simulação
+              </button>
+            ) : null}
+            {!userInfo?.impersonatedBy && userInfo?.role === "admin" ? (
+              <button
+                onClick={() => setShowUsers(true)}
+                className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+                title="Gerenciar usuários"
+              >
+                Usuários
+              </button>
+            ) : null}
             <button
               onClick={handleLogout}
               className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
@@ -513,56 +977,75 @@ export function App() {
           </div>
         </header>
 
-        <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
-          <h2 className="mb-3 text-sm font-medium text-slate-200">{editingTask ? "Editar task" : "Nova task"}</h2>
+        <div className="mb-6 flex border-b border-slate-800">
+          {(["tasks", "concluídas", "canceladas"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={
+                "px-4 py-2 text-sm font-medium transition-colors " +
+                (tab === t ? "border-b-2 border-indigo-500 text-indigo-300" : "text-slate-400 hover:text-slate-200")
+              }
+            >
+              {t === "tasks"
+                ? `Tasks (${tasks.filter((x) => x.status !== "concluída" && x.status !== "cancelada").length})`
+                : ""}
+              {t === "concluídas" ? `Concluídas (${tasks.filter((x) => x.status === "concluída").length})` : ""}
+              {t === "canceladas" ? `Canceladas (${tasks.filter((x) => x.status === "cancelada").length})` : ""}
+            </button>
+          ))}
+        </div>
 
-          <form className="grid gap-3" onSubmit={editingTask ? onSaveEdit : onCreate}>
-            <input
-              value={draft.title}
-              onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-              className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm outline-none focus:border-slate-600"
-              placeholder="Título"
-              maxLength={200}
-            />
-            <textarea
-              value={draft.description}
-              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-              className="min-h-20 w-full resize-y rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm outline-none focus:border-slate-600"
-              placeholder="Descrição (opcional)"
-              maxLength={5000}
-            />
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Deadline</label>
-                <DatePicker
-                  selected={draft.deadline ? new Date(draft.deadline + "T00:00:00") : null}
-                  onChange={(date: Date | null) =>
-                    setDraft((d) => ({ ...d, deadline: date ? date.toISOString().split("T")[0] : "" }))
-                  }
-                  dateFormat="dd/MM/yyyy"
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-600"
-                  placeholderText="Selecione a data"
-                />
+        {editingTask ? (
+          <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+            <h2 className="mb-3 text-sm font-medium text-slate-200">Editar task</h2>
+
+            <form className="grid gap-3" onSubmit={onSaveEdit}>
+              <input
+                value={draft.title}
+                onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+                className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm outline-none focus:border-slate-600"
+                placeholder="Título"
+                maxLength={200}
+              />
+              <textarea
+                value={draft.description}
+                onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+                className="min-h-20 w-full resize-y rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm outline-none focus:border-slate-600"
+                placeholder="Descrição (opcional)"
+                maxLength={5000}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs text-slate-400">Deadline</label>
+                  <DatePicker
+                    selected={draft.deadline ? new Date(draft.deadline + "T00:00:00") : null}
+                    onChange={(date: Date | null) =>
+                      setDraft((d) => ({ ...d, deadline: date ? date.toISOString().split("T")[0] : "" }))
+                    }
+                    dateFormat="dd/MM/yyyy"
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-600"
+                    placeholderText="Selecione a data"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-slate-400">Tempo Estimado</label>
+                  <input
+                    type="time"
+                    step="60"
+                    value={hoursToTime(draft.estimatedHours)}
+                    onChange={(e) => setDraft((d) => ({ ...d, estimatedHours: timeToHours(e.target.value) }))}
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-600"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Tempo Estimado</label>
-                <input
-                  type="time"
-                  step="60"
-                  value={hoursToTime(draft.estimatedHours)}
-                  onChange={(e) => setDraft((d) => ({ ...d, estimatedHours: timeToHours(e.target.value) }))}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-600"
-                />
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="submit"
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
-              >
-                {editingTask ? "Salvar" : "Adicionar"}
-              </button>
-              {editingTask ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                >
+                  Salvar
+                </button>
                 <button
                   type="button"
                   onClick={cancelEdit}
@@ -570,20 +1053,28 @@ export function App() {
                 >
                   Cancelar
                 </button>
-              ) : null}
-            </div>
-          </form>
-        </section>
+              </div>
+            </form>
+          </section>
+        ) : null}
 
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40">
           <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
             <h2 className="text-sm font-medium text-slate-200">Lista</h2>
-            <button
-              onClick={() => void refresh()}
-              className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900"
-            >
-              Recarregar
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowNewTask(true)}
+                className="rounded-lg border border-indigo-800 bg-indigo-950/30 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-950/50"
+              >
+                + Nova Task
+              </button>
+              <button
+                onClick={() => void refresh()}
+                className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900"
+              >
+                Recarregar
+              </button>
+            </div>
           </div>
 
           {loading ? <div className="p-4 text-sm text-slate-400">Carregando…</div> : null}
@@ -592,7 +1083,7 @@ export function App() {
           ) : null}
 
           <ul className="divide-y divide-slate-800">
-            {tasks.map((t) => (
+            {paginatedTasks.map((t) => (
               <li key={t.id} className="px-4 py-4">
                 <div className="flex items-start gap-3">
                   <button
@@ -734,6 +1225,28 @@ export function App() {
               </li>
             ))}
           </ul>
+
+          {filteredTasks.length > PER_PAGE ? (
+            <div className="flex items-center justify-center gap-4 border-t border-slate-800 px-4 py-3">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900 disabled:opacity-40"
+              >
+                Anterior
+              </button>
+              <span className="text-xs text-slate-400">
+                {safePage} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+                className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900 disabled:opacity-40"
+              >
+                Próximo
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
     </div>

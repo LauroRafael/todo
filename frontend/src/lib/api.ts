@@ -1,5 +1,13 @@
 export type TaskStatus = "pendente" | "em_execução" | "concluída" | "cancelada";
 
+export type User = {
+  id: string;
+  username: string;
+  displayName: string;
+  role: string;
+  createdAt: string;
+};
+
 export type Apontamento = {
   id: string;
   taskId: string;
@@ -70,10 +78,23 @@ export const api = {
     http<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   health: () => http<Health>("/health"),
   listTasks: () => http<Task[]>("/tasks"),
-  createTask: (data: { title: string; description?: string | null; deadline?: string | null; estimatedHours?: number }) =>
-    http<Task>("/tasks", { method: "POST", body: JSON.stringify(data) }),
-  updateTask: (id: string, data: { title?: string; description?: string | null; status?: TaskStatus; completed?: boolean; deadline?: string | null; estimatedHours?: number }) =>
-    http<Task>(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  createTask: (data: {
+    title: string;
+    description?: string | null;
+    deadline?: string | null;
+    estimatedHours?: number;
+  }) => http<Task>("/tasks", { method: "POST", body: JSON.stringify(data) }),
+  updateTask: (
+    id: string,
+    data: {
+      title?: string;
+      description?: string | null;
+      status?: TaskStatus;
+      completed?: boolean;
+      deadline?: string | null;
+      estimatedHours?: number;
+    }
+  ) => http<Task>(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteTask: (id: string) => http<void>(`/tasks/${id}`, { method: "DELETE" }),
   listApontamentos: (taskId: string) => http<Apontamento[]>(`/tasks/${taskId}/apontamentos`),
   countApontamentos: (taskId: string) => http<{ count: number }>(`/tasks/${taskId}/apontamentos/count`),
@@ -81,6 +102,13 @@ export const api = {
     http<Apontamento>("/tasks/apontamentos", { method: "POST", body: JSON.stringify(data) }),
   updateApontamento: (id: string, data: { content?: string | null; hoursSpent?: number; workDate?: string }) =>
     http<Apontamento>(`/tasks/apontamentos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteApontamento: (id: string) => http<void>(`/tasks/apontamentos/${id}`, { method: "DELETE" })
+  deleteApontamento: (id: string) => http<void>(`/tasks/apontamentos/${id}`, { method: "DELETE" }),
+  listUsers: () => http<User[]>("/auth/users"),
+  createUser: (data: { username: string; password: string; role?: string }) =>
+    http<User>("/auth/users", { method: "POST", body: JSON.stringify(data) }),
+  impersonateUser: (username: string) =>
+    http<LoginResponse>("/auth/impersonate", { method: "POST", body: JSON.stringify({ username }) }),
+  updateUser: (id: string, data: { username?: string; password?: string; role?: string }) =>
+    http<User>(`/auth/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteUser: (id: string) => http<void>(`/auth/users/${id}`, { method: "DELETE" })
 };
-

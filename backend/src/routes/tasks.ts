@@ -51,9 +51,14 @@ tasksRouter.use((_req, res, next) => {
   return next();
 });
 
-tasksRouter.get("/", async (_req, res) => {
+tasksRouter.get("/", async (req: AuthRequest, res) => {
   const repo = AppDataSource.getRepository("Task");
-  const tasks = await repo.find({ order: { createdAt: "DESC" } });
+  const userRepo = AppDataSource.getRepository("User");
+
+  const user = await userRepo.findOneBy({ username: req.user?.username });
+  if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
+  const tasks = await repo.find({ where: { userId: user.id }, order: { createdAt: "DESC" } });
+
   const apontRepo = AppDataSource.getRepository("Apontamento");
   const tasksWithCount = await Promise.all(
     tasks.map(async (t) => {
@@ -64,9 +69,13 @@ tasksRouter.get("/", async (_req, res) => {
   return res.json(tasksWithCount);
 });
 
-tasksRouter.post("/", async (req, res) => {
+tasksRouter.post("/", async (req: AuthRequest, res) => {
   const parsed = createTaskSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const userRepo = AppDataSource.getRepository("User");
+  const user = await userRepo.findOneBy({ username: req.user?.username });
+  if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
 
   const repo = AppDataSource.getRepository("Task");
   const deadline = parseDate(parsed.data.deadline);
@@ -78,7 +87,8 @@ tasksRouter.post("/", async (req, res) => {
     estimatedHours: parsed.data.estimatedHours ?? 0,
     postponedCount: 0,
     completed: false,
-    status: "pendente"
+    status: "pendente",
+    userId: user.id
   });
   await repo.save(task);
   await logTaskEvent(req as AuthRequest, task.id, "task_created", { title: task.title });

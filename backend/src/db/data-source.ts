@@ -12,6 +12,7 @@ export type Task = {
   estimatedHours: number;
   executedHours: number;
   postponedCount: number;
+  userId: string;
   createdAt: Date;
   updatedAt: Date;
   apontamentos?: Apontamento[];
@@ -37,6 +38,16 @@ export type TaskEvent = {
   createdAt: Date;
 };
 
+export type User = {
+  id: string;
+  username: string;
+  passwordHash: string;
+  role: string;
+  displayName: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 const TaskSchema = new EntitySchema<Task>({
   name: "Task",
   tableName: "tasks",
@@ -50,6 +61,7 @@ const TaskSchema = new EntitySchema<Task>({
     estimatedHours: { type: "float", default: 0 },
     executedHours: { type: "float", default: 0 },
     postponedCount: { type: "int", default: 0 },
+    userId: { type: "uuid", nullable: false },
     createdAt: { type: "timestamp", createDate: true },
     updatedAt: { type: "timestamp", updateDate: true }
   },
@@ -100,6 +112,20 @@ const TaskEventSchema = new EntitySchema<TaskEvent>({
   }
 });
 
+const UserSchema = new EntitySchema<User>({
+  name: "User",
+  tableName: "users",
+  columns: {
+    id: { type: "uuid", primary: true, generated: "uuid" },
+    username: { type: "varchar", length: 100, unique: true },
+    passwordHash: { type: "varchar", length: 255 },
+    role: { type: "varchar", length: 20, default: "user" },
+    displayName: { type: "varchar", length: 200, default: "" },
+    createdAt: { type: "timestamp", createDate: true },
+    updatedAt: { type: "timestamp", updateDate: true }
+  }
+});
+
 export const AppDataSource = new DataSource({
   type: "mysql",
   host: env.DB_HOST,
@@ -107,7 +133,7 @@ export const AppDataSource = new DataSource({
   username: env.DB_USER,
   password: env.DB_PASSWORD,
   database: env.DB_NAME,
-  entities: [TaskSchema, ApontamentoSchema, TaskEventSchema],
+  entities: [TaskSchema, ApontamentoSchema, TaskEventSchema, UserSchema],
   synchronize: env.NODE_ENV !== "production",
   logging: env.NODE_ENV === "production" ? ["error"] : ["error", "schema"]
 });
